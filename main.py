@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from fastapi import FastAPI, HTTPException, Header, Query
+from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from playwright.async_api import async_playwright, BrowserContext, Page, Playwright
@@ -29,8 +29,15 @@ def valid_client_id(client_id: str) -> str:
     return client_id
 
 
-def require_key(x_worker_key: Optional[str]):
-    if WORKER_API_KEY and not hmac.compare_digest(x_worker_key or "", WORKER_API_KEY):
+def require_key(x_worker_key: Optional[str], authorization: Optional[str] = None):
+    if not WORKER_API_KEY:
+        return
+    supplied = (x_worker_key or "").strip()
+    if not supplied and authorization:
+        prefix = "Bearer "
+        if authorization.startswith(prefix):
+            supplied = authorization[len(prefix):].strip()
+    if not hmac.compare_digest(supplied, WORKER_API_KEY):
         raise HTTPException(status_code=401, detail="Worker API 인증 실패")
 
 
@@ -119,8 +126,8 @@ async def health():
 
 
 @app.get("/profile/status")
-async def profile_status(client_id: str, x_worker_key: Optional[str] = Header(default=None)):
-    require_key(x_worker_key)
+async def profile_status(client_id: str, x_worker_key: Optional[str] = Header(default=None), authorization: Optional[str] = Header(default=None)):
+    require_key(x_worker_key, authorization)
     client_id = valid_client_id(client_id)
     # If an interactive session is open, inspect it directly.
     if client_id in sessions:
@@ -325,8 +332,8 @@ async def find_comment_blocks(page: Page, shortcode: str) -> List[Dict[str, Any]
 
 
 @app.post("/scrape")
-async def scrape(req: ScrapeReq, x_worker_key: Optional[str] = Header(default=None)):
-    require_key(x_worker_key)
+async def scrape(req: ScrapeReq, x_worker_key: Optional[str] = Header(default=None), authorization: Optional[str] = Header(default=None)):
+    require_key(x_worker_key, authorization)
     client_id=valid_client_id(req.client_id); shortcode=extract_shortcode(req.url)
     if client_id in sessions:
         await close_session(client_id)
